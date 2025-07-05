@@ -2,6 +2,7 @@ const express = require('express');
 const app = express();
 
 const Datastore = require('nedb');
+const { map } = require('underscore');
 
 //Server list database
 const servers_db = new Datastore('servers.db');
@@ -34,6 +35,8 @@ matches_db.loadDatabase();
 // Listening on port 3000.
 app.listen(3000);
 app.use(express.json());
+
+console.log("Server running")
 
 // Getting the path request and sending the response with text.
 app.get('/test', (req, res) => {
@@ -128,9 +131,10 @@ app.post('/submitPlayers', (req, res) => {
     const teamID = newTeam._id; // or newTeam.team_id depending on your DB setup
 
     // Step 2: Map each playerID to an entry in the team_players join table
-    const teamPlayers = selectedPlayers.map(playerID => ({
+    const teamPlayers = selectedPlayers.map((playerID, index) => ({
       team_id: teamID,
-      player_id: playerID
+      player_id: playerID,
+      position_index: index
     }));
 
     // Insert all join entries
@@ -172,6 +176,60 @@ app.get('/fetch-players', (req,res) => {
     }
     else{
       res.status(200).json({players : playerDoc});
+    }
+  })
+})
+
+app.get('/get-team', (req, res) => {
+  const user_id = req.query.userID;
+
+  teams_db.find({"user_id" : user_id}, (err, doc) => {
+    if(err){
+      res.status(500).json({error : err});
+    }
+    else if(!doc){
+      res.status(404).json({message : "not found"})
+    }
+    else{
+      team_id = doc[0]._id;
+      team_players_db.find({"team_id" : team_id}, (teamErr, teamDoc) => {
+        if(teamErr){
+          res.status(500).json({error : teamErr})
+        }
+        else if(!teamDoc){
+          res.status(404).json({message : "not found"});
+        }
+        else{
+          const sorted_team = [...teamDoc].sort(
+            (a, b) => a.position_index - b.position_index
+          );
+          
+          // NEED res.json code completed
+
+          // sorted_team contains an array of player_ids, ordered by their position_index
+          // player_id maps to _id in the players.db file (denoted by players_db in the index.js file)
+          // we need the array sorted_team (containing player_id - not useful to the end user) to map to "name" which is a field in players_db
+
+          // TASK : complete the mapping of "player_id" to "name" in the players.db file and send the array as res.json
+
+          const playerIds = sorted_team.map(player => player.player_id);
+
+          players_db.find({ _id: { $in: playerIds } }, (playerErr, players) => {
+            if (playerErr) {
+              res.status(500).json({ error: playerErr });
+            } else {
+              const idToName = {};
+              players.forEach(p => {
+                idToName[p._id] = p.name;
+              });
+
+              const playerNames = sorted_team.map(player => idToName[player.player_id]);
+
+              res.json({ team: playerNames }).status(200);
+            }
+          });
+        }
+      })
     }
   })
 })
