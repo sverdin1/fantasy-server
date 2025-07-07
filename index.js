@@ -234,9 +234,39 @@ app.get('/get-team', (req, res) => {
   })
 })
 
-app.post('/submit-match', (req, res) => {
+app.post('/submit-result', (req, res) => {
   const data = req.body;
-  const goalScorers = data.scorers; // array of IDs of goal scorers (foreign key)
+  const goalScorerIds = data.goal_scorers;
 
-  
-})
+  // First create the match entry
+  matches_db.insert({
+    opposition: data.opposition,
+    goals_for: data.goals_for,
+    goals_against: data.goals_against,
+    server_id : data.server_id
+  }, (err, matchDoc) => {
+    if (err) {
+      return res.status(500).send({ error: 'Failed to insert match', details: err });
+    }
+
+    const match_id = matchDoc._id;
+
+    const goal_scorers = goalScorerIds.map((id) => ({
+      scorer_id: id,
+      match_id: match_id
+      // Add more attributes later:
+      // assisted: data.assist_id,
+      // minute: data.min
+    }));
+
+    // Once the match entry has been created - insert match_id into goals_db
+    goals_db.insert(goal_scorers, (err) => {
+      if (err) {
+        return res.status(500).send({ error: 'Failed to insert goal scorers', details: err });
+      }
+
+      console.log("Goal scorers added");
+      return res.status(200).send({ message: "Match and goal scorers saved successfully." });
+    });
+  });
+});
