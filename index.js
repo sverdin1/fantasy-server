@@ -4,29 +4,33 @@ const app = express();
 const Datastore = require('nedb');
 const { map } = require('underscore');
 
-//Server list database
+// Server list database
 const servers_db = new Datastore('servers.db');
 servers_db.loadDatabase();
-
-//Teams database
+ 
+// Teams database
 const teams_db = new Datastore('teams.db');
 teams_db.loadDatabase();
 
-//Players database
+// Players database
 const players_db = new Datastore('players.db');
 players_db.loadDatabase();
 
-//Join table between "Teams" and "Players"
+// Join table between "Teams" and "Players"
 const team_players_db = new Datastore('team_players.db');
 team_players_db.loadDatabase();
 
-//Goals database
+// Goals database
 const goals_db = new Datastore('goals.db');
 goals_db.loadDatabase();
 
-//Matches database
+// Matches database
 const matches_db = new Datastore('matches.db');
 matches_db.loadDatabase();
+
+// Gameweeks database
+const gameweeks_db = new Datastore('gameweeks.db');
+gameweeks_db.loadDatabase();
 
 
 //  ------------------------------------
@@ -234,39 +238,131 @@ app.get('/get-team', (req, res) => {
   })
 })
 
+function getRecentGameweek(given_server_id, callback) {
+  gameweeks_db.find({ server_id: given_server_id }, (err, docs) => {
+    if (err) {
+      callback(err, null); // Need to use 'callback' and not 'return' - due to the asynchronous nature of the fetch!
+    } else {
+      const date = docs.find(item => {item.gameweek == docs.length}).date_formed;
+      callback(null, {
+        recent_gameweek : docs.length,
+        gameweek_date : date
+      });
+    }
+  });
+}
+
+app.get('/fetch-recent-gameweek', (req, res) => {
+  const server_id = req.query.serverID;
+  getRecentGameweek(server_id, (err, data) => {
+    if(err){
+      res.status(500).send({error : err});
+    }
+    else{
+      res.status(200).send(data); // Data is already a JSON object in the form we require for the front-end
+    }
+  })
+})
+
 app.post('/submit-result', (req, res) => {
   const data = req.body;
   const goalScorerIds = data.goal_scorers;
 
-  // First create the match entry
-  matches_db.insert({
-    opposition: data.opposition,
-    goals_for: data.goals_for,
-    goals_against: data.goals_against,
-    server_id : data.server_id
-  }, (err, matchDoc) => {
-    if (err) {
-      return res.status(500).send({ error: 'Failed to insert match', details: err });
+  // Fetching most recent gameweek from database
+  getRecentGameweek(data.serverID, (err, data) =>{
+    if(err){
+      return res.status(500).send({error : "Issue fetching recent gameweek"});
     }
+  
+    // CREATE NEW GAMEWEEK
+    if(data.new_gameweek == 1){
+      gameweeks_db.insert({
+        gameweek : data.recent_gameweek + 1, // Incrementing most recent gameweek
+        date_formed : Date.now(),
+        server_id : data.server_id
+      }, (err, gameweekDoc) => {
+        if(err){
+          return res.status(500).send({error : err});
+        }
 
-    const match_id = matchDoc._id;
+        const gameweek_id = gameweekDoc._id;
 
-    const goal_scorers = goalScorerIds.map((id) => ({
-      scorer_id: id,
-      match_id: match_id
-      // Add more attributes later:
-      // assisted: data.assist_id,
-      // minute: data.min
-    }));
+        // First create the match entry
+        matches_db.insert({
+          opposition: data.opposition,
+          goals_for: data.goals_for,
+          goals_against: data.goals_against,
+          gameweek_id : gameweek_id
+        }, (err, matchDoc) => {
+          if (err) {
+            return res.status(500).send({ error: 'Failed to insert match', details: err });
+          }
 
-    // Once the match entry has been created - insert match_id into goals_db
-    goals_db.insert(goal_scorers, (err) => {
-      if (err) {
-        return res.status(500).send({ error: 'Failed to insert goal scorers', details: err });
-      }
+          const match_id = matchDoc._id;
+            
+          const goal_scorers = goalScorerIds.map((id) => ({
+            scorer_id: id,
+            match_id: match_id
+            // Add more attributes later:
+            // assisted: data.assist_id,
+            // minute: data.min
+          }));
 
-      console.log("Goal scorers added");
-      return res.status(200).send({ message: "Match and goal scorers saved successfully." });
-    });
+          // Once the match entry has been created - insert match_id into goals_db
+          goals_db.insert(goal_scorers, (err) => {
+            if (err) {
+              return res.status(500).send({ error: 'Failed to insert goal scorers', details: err });
+            }
+
+            console.log("Goal scorers added");
+            return res.status(200).send({ message: "Match and goal scorers saved successfully." });
+          });
+
+          // WILL LATER ADD THE SQUAD HERE!
+        });
+      });
+    }
+    // This should never be called if there isn't already an existing gameweek (validated by the front end)
+    else{
+      gameweeks_db.findOne({server_id : data.server_id, gameweek : data.recent_gameweek}, (err, foundData) => {
+        if(err){
+          return res.status(500).send({error : err});
+        }
+
+        const gameweek_id = foundData._id; // Finding the most recent gameweek_id
+
+        // First create the match entry
+        matches_db.insert({
+          opposition: data.opposition,
+          goals_for: data.goals_for,
+          goals_against: data.goals_against,
+          gameweek_id : gameweek_id
+        }, (err, matchDoc) => {
+          if (err) {
+            return res.status(500).send({ error: 'Failed to insert match', details: err });
+          }
+
+          const match_id = matchDoc._id;
+            
+          const goal_scorers = goalScorerIds.map((id) => ({
+            scorer_id: id,
+            match_id: match_id
+            // Add more attributes later:
+            // assisted: data.assist_id,
+            // minute: data.min
+          }));
+
+          // Once the match entry has been created - insert match_id into goals_db
+          goals_db.insert(goal_scorers, (err) => {
+            if (err) {
+              return res.status(500).send({ error: 'Failed to insert goal scorers', details: err });
+            }
+
+            console.log("Goal scorers added");
+            return res.status(200).send({ message: "Match and goal scorers saved successfully." });
+          });
+        });
+      })
+    }
   });
 });
