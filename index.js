@@ -243,11 +243,20 @@ function getRecentGameweek(given_server_id, callback) {
     if (err) {
       callback(err, null); // Need to use 'callback' and not 'return' - due to the asynchronous nature of the fetch!
     } else {
-      const date = docs.find(item => {item.gameweek == docs.length}).date_formed;
-      callback(null, {
-        recent_gameweek : docs.length,
-        gameweek_date : date
-      });
+      if(docs.length != 0){
+        const date = docs.find(item => item.gameweek == docs.length)?.date_formed;
+        console.log("date : " + date);
+        callback(null, {
+          recent_gameweek : docs.length,
+          gameweek_date : date
+        });
+      }
+      else{
+        callback(null, {
+          recent_gameweek : 0,
+          gameweek_date : null
+        });
+      }
     }
   });
 }
@@ -269,15 +278,18 @@ app.post('/submit-result', (req, res) => {
   const goalScorerIds = data.goal_scorers;
 
   // Fetching most recent gameweek from database
-  getRecentGameweek(data.serverID, (err, data) =>{
+  getRecentGameweek(data.server_id, (err, gameweekData) =>{
     if(err){
       return res.status(500).send({error : "Issue fetching recent gameweek"});
     }
+
+    console.log(data);
+    console.log("data.new_gameweek : " + data.new_gameweek);
   
     // CREATE NEW GAMEWEEK
     if(data.new_gameweek == 1){
       gameweeks_db.insert({
-        gameweek : data.recent_gameweek + 1, // Incrementing most recent gameweek
+        gameweek : gameweekData.recent_gameweek + 1, // Incrementing most recent gameweek
         date_formed : Date.now(),
         server_id : data.server_id
       }, (err, gameweekDoc) => {
@@ -324,7 +336,7 @@ app.post('/submit-result', (req, res) => {
     }
     // This should never be called if there isn't already an existing gameweek (validated by the front end)
     else{
-      gameweeks_db.findOne({server_id : data.server_id, gameweek : data.recent_gameweek}, (err, foundData) => {
+      gameweeks_db.findOne({server_id : data.server_id, gameweek : gameweekData.recent_gameweek}, (err, foundData) => {
         if(err){
           return res.status(500).send({error : err});
         }
