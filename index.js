@@ -32,6 +32,10 @@ matches_db.loadDatabase();
 const gameweeks_db = new Datastore('gameweeks.db');
 gameweeks_db.loadDatabase();
 
+// Squads database
+const squads_db = new Datastore('squads.db');
+squads_db.loadDatabase();
+
 
 //  ------------------------------------
 
@@ -276,6 +280,7 @@ app.get('/fetch-recent-gameweek', (req, res) => {
 app.post('/submit-result', (req, res) => {
   const data = req.body;
   const goalScorerIds = data.goal_scorers;
+  const squad = data.squad;
 
   // Fetching most recent gameweek from database
   getRecentGameweek(data.server_id, (err, gameweekData) =>{
@@ -327,10 +332,23 @@ app.post('/submit-result', (req, res) => {
             }
 
             console.log("Goal scorers added");
-            return res.status(200).send({ message: "Match and goal scorers saved successfully." });
+              
+            // Adding matchday squad
+            
+            const matchday_squad = squad.map((id) => ({
+              player_id : id,
+              match_id : match_id})
+            ); 
+            
+            squads_db.insert(matchday_squad, (err) => {
+              if(err){
+                return res.status(500).send({error : err});
+              }
+              else{
+                return res.status(200).send({ message: "Match and goal scorers and squad saved successfully." }); 
+              }
+            })
           });
-
-          // WILL LATER ADD THE SQUAD HERE!
         });
       });
     }
@@ -371,7 +389,22 @@ app.post('/submit-result', (req, res) => {
             }
 
             console.log("Goal scorers added");
-            return res.status(200).send({ message: "Match and goal scorers saved successfully." });
+            
+            // Adding matchday squad
+            
+            const matchday_squad = squad.map((id) => ({
+              player_id : id,
+              match_id : match_id})
+            ); 
+            
+            squads_db.insert(matchday_squad, (err) => {
+              if(err){
+                return res.status(500).send({error : err});
+              }
+              else{
+                return res.status(200).send({ message: "Match and goal scorers and squad saved successfully." }); 
+              }
+            })
           });
         });
       })
