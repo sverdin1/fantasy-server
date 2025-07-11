@@ -374,9 +374,10 @@ app.post('/submit-result', (req, res) => {
 
           const match_id = matchDoc._id;
             
-          const goal_scorers = goalScorerIds.map((id) => ({
+          const goal_scorers = goalScorerIds.map((id, index) => ({
             scorer_id: id,
-            match_id: match_id
+            match_id: match_id,
+            assisted_by: data.assisters[index]
             // Add more attributes later:
             // assisted: data.assist_id,
             // minute: data.min
