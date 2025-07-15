@@ -7,7 +7,7 @@ const { map } = require('underscore');
 // Server list database
 const servers_db = new Datastore('servers.db');
 servers_db.loadDatabase();
- 
+
 // Teams database
 const teams_db = new Datastore('teams.db');
 teams_db.loadDatabase();
@@ -52,8 +52,8 @@ console.log("Server running")
 
 // Getting the path request and sending the response with text.
 app.get('/test', (req, res) => {
-    console.log('Connected!');
-    res.send('Connected!');
+  console.log('Connected!');
+  res.send('Connected!');
 });
 
 // Adds a player to a server
@@ -113,35 +113,35 @@ app.get('/players', (req, res) => {
 });
 
 // Does exactly the same thing as the function above, I need to remove one of these
-app.get('/fetch-players', (req,res) => {
+app.get('/fetch-players', (req, res) => {
   const server_id = req.query.serverID;
 
-  players_db.find({"server_id" : server_id}, (playerErr, playerDoc) => {
-    if(playerErr){
-      res.status(500).json({error : playerErr});
+  players_db.find({ "server_id": server_id }, (playerErr, playerDoc) => {
+    if (playerErr) {
+      res.status(500).json({ error: playerErr });
     }
-    else if (playerDoc.length === 0){
-      res.status(404).json({message : "No players in this position"});
+    else if (playerDoc.length === 0) {
+      res.status(404).json({ message: "No players in this position" });
     }
-    else{
-      res.status(200).json({players : playerDoc});
+    else {
+      res.status(200).json({ players: playerDoc });
     }
   })
 })
 
 // Queries whether a user's data is saved
-app.get('/user', (req,res) => {
+app.get('/user', (req, res) => {
   const user_id = req.query.user_id;
 
-  teams_db.find({"user_id" : user_id}, (err, foundData)=>{
-    if(err){
-      res.status(500).json({'status' : err});
+  teams_db.find({ "user_id": user_id }, (err, foundData) => {
+    if (err) {
+      res.status(500).json({ 'status': err });
     }
-    else if(foundData.length === 0){
-      res.status(404).json({"status" : "not found"});
+    else if (foundData.length === 0) {
+      res.status(404).json({ "status": "not found" });
     }
-    else{
-      res.status(200).json({"status" : "found!"})
+    else {
+      res.status(200).json({ "status": "found!" })
     }
   })
 })
@@ -198,59 +198,148 @@ app.post('/join-league', (req, res) => {
 });
 
 // Returns a user's team, given the user_id
-app.get('/get-team', (req, res) => {
+// app.get('/get-team', (req, res) => {
+//   const user_id = req.query.userID;
+
+//   teams_db.find({ "user_id": user_id }, (err, doc) => {
+//     if (err) {
+//       res.status(500).json({ error: err });
+//     }
+//     else if (!doc) {
+//       res.status(404).json({ message: "not found" })
+//     }
+//     else {
+//       team_id = doc[0]._id;
+//       team_players_db.find({ "team_id": team_id }, (teamErr, teamDoc) => {
+//         if (teamErr) {
+//           res.status(500).json({ error: teamErr })
+//         }
+//         else if (!teamDoc) {
+//           res.status(404).json({ message: "not found" });
+//         }
+//         else {
+//           const sorted_team = [...teamDoc].sort(
+//             (a, b) => a.position_index - b.position_index
+//           );
+
+//           const playerIds = sorted_team.map(player => player.player_id);
+
+//           players_db.find({ _id: { $in: playerIds } }, (playerErr, players) => {
+//             if (playerErr) {
+//               res.status(500).json({ error: playerErr });
+//             } else {
+//               const idToName = {};
+//               players.forEach(p => {
+//                 idToName[p._id] = p.name;
+//               });
+
+//               const playerNames = sorted_team.map(player => idToName[player.player_id]);
+
+//               res.json({ team: playerNames }).status(200);
+//             }
+//           });
+//         }
+//       })
+//     }
+//   })
+// })
+
+// Returns an array of sorted objects from team_players
+async function fetchTeam(userID) {
+  return new Promise((resolve, reject) => {
+    teams_db.find({ user_id: userID }, (err, doc) => {
+      if (err) return reject(err);
+      if (!doc || doc.length === 0) return resolve([]);
+
+      const team_id = doc[0]._id;
+
+      team_players_db.find({ team_id }, (teamErr, teamDoc) => {
+        if (teamErr) return reject(teamErr);
+        if (!teamDoc || teamDoc.length === 0) return resolve([]);
+
+        const sorted_team = [...teamDoc].sort(
+          (a, b) => a.position_index - b.position_index
+        );
+
+        resolve(sorted_team);
+      });
+    });
+  });
+}
+
+app.get('/get-team', async (req, res) => {
   const user_id = req.query.userID;
 
-  teams_db.find({"user_id" : user_id}, (err, doc) => {
-    if(err){
-      res.status(500).json({error : err});
-    }
-    else if(!doc){
-      res.status(404).json({message : "not found"})
-    }
-    else{
-      team_id = doc[0]._id;
-      team_players_db.find({"team_id" : team_id}, (teamErr, teamDoc) => {
-        if(teamErr){
-          res.status(500).json({error : teamErr})
+  console.log("Request received")
+
+  try {
+    const sorted_team = await fetchTeam(user_id);
+    const playerIds = sorted_team.map(player => player.player_id);
+
+    const server_id = await new Promise((resolve, reject) => {
+      teams_db.find({ user_id: user_id }, (err, doc) => {
+        if (err) {
+          console.log("Error fetching server id")
+          return reject(err)
+        };
+        if (!doc || doc.length === 0) return reject("No server found");
+        resolve(doc[0].server_id);
+      });
+    });
+
+    const recent_gameweek_id = await new Promise((resolve, reject) => {
+      getRecentGameweek(server_id, (err, doc) => {
+        if (err) {
+          console.log("Error fetching gameweek id")
+          return reject(err);
         }
-        else if(!teamDoc){
-          res.status(404).json({message : "not found"});
+        resolve(doc.recent_gameweek_id);
+      });
+    });
+
+    const players = await new Promise((resolve, reject) => {
+      players_db.find({ _id: { $in: playerIds } }, (err, docs) => {
+        if (err) {
+          console.log("Error fetching player info")
+          return reject(err);
         }
-        else{
-          const sorted_team = [...teamDoc].sort(
-            (a, b) => a.position_index - b.position_index
-          );
-          
-          // NEED res.json code completed
+        resolve(docs);
+      });
+    });
 
-          // sorted_team contains an array of player_ids, ordered by their position_index
-          // player_id maps to _id in the players.db file (denoted by players_db in the index.js file)
-          // we need the array sorted_team (containing player_id - not useful to the end user) to map to "name" which is a field in players_db
+    //console.log(players);
 
-          // TASK : complete the mapping of "player_id" to "name" in the players.db file and send the array as res.json
+    const points = await new Promise((resolve, reject) => {
+      points_db.find({
+        player_id: { $in: playerIds },
+        gameweek_id: recent_gameweek_id
+      }, (err, docs) => {
+        if (err) {
+          console.log("Error fetching points")
+          return reject(err)
+        };
+        resolve(docs);
+      });
+    });
 
-          const playerIds = sorted_team.map(player => player.player_id);
+    const getPoints = (playerId) =>
+      points.find(p => p.player_id === playerId)?.points || 0;
 
-          players_db.find({ _id: { $in: playerIds } }, (playerErr, players) => {
-            if (playerErr) {
-              res.status(500).json({ error: playerErr });
-            } else {
-              const idToName = {};
-              players.forEach(p => {
-                idToName[p._id] = p.name;
-              });
+    const idToName = players.map(item => item.name);
 
-              const playerNames = sorted_team.map(player => idToName[player.player_id]);
+    const player_data = sorted_team.map((obj,index) => ({
+      player_id: obj.player_id,
+      player_name: idToName[index],
+      player_points: getPoints(obj.player_id),
+    }));
 
-              res.json({ team: playerNames }).status(200);
-            }
-          });
-        }
-      })
-    }
-  })
-})
+    res.status(200).json({ team: player_data });
+  } catch (error) {
+    console.log(error)
+    res.status(500).json({ error: error.message || error });
+  }
+});
+
 
 // Returns the most recent gameweek, given the server_id
 function getRecentGameweek(given_server_id, callback) {
@@ -258,18 +347,21 @@ function getRecentGameweek(given_server_id, callback) {
     if (err) {
       callback(err, null); // Need to use 'callback' and not 'return' - due to the asynchronous nature of the fetch!
     } else {
-      if(docs.length != 0){
+      if (docs.length != 0) {
         const date = docs.find(item => item.gameweek == docs.length)?.date_formed;
+        const recent_gameweek_id = docs.find(item => item.gameweek == docs.length)?._id;
         console.log("date : " + date);
         callback(null, {
-          recent_gameweek : docs.length,
-          gameweek_date : date
+          recent_gameweek: docs.length,
+          recent_gameweek_id: recent_gameweek_id,
+          gameweek_date: date
         });
       }
-      else{
+      else {
         callback(null, {
-          recent_gameweek : 0,
-          gameweek_date : null
+          recent_gameweek: 0,
+          recent_gameweek_id: null,
+          gameweek_date: null
         });
       }
     }
@@ -280,10 +372,10 @@ function getRecentGameweek(given_server_id, callback) {
 app.get('/fetch-recent-gameweek', (req, res) => {
   const server_id = req.query.serverID;
   getRecentGameweek(server_id, (err, data) => {
-    if(err){
-      res.status(500).send({error : err});
+    if (err) {
+      res.status(500).send({ error: err });
     }
-    else{
+    else {
       res.status(200).send(data); // Data is already a JSON object in the form we require for the front-end
     }
   })
@@ -295,38 +387,42 @@ async function calculatePoints(player_id, data) {
   const assisters = data.assisters;
 
   return new Promise((resolve, reject) => {
-    players_db.findOne({"_id" : player_id }, (err, playerFound) => {
+    players_db.findOne({ "_id": player_id }, (err, playerFound) => {
       if (!playerFound || err) {
-      console.log("No player found")
-      return resolve(0);
-    };
+        console.log("No player found")
+        return resolve(0);
+      };
 
-    console.log(playerFound);
-    const playerPosition = playerFound.position;
-    let points = 0;
+      console.log(playerFound);
+      const playerPosition = playerFound.position;
+      let points = 0;
 
-    if (playerPosition === "Defence") {
-      if (data.goals_against === 0) points += 4;
-      if (goal_scorers.includes(player_id)) points += 6;
-      if (assisters.includes(player_id)) points += 3;
-    } else if (playerPosition === "Midfield") {
-      if (data.goals_against === 0) points += 1;
-      if (goal_scorers.includes(player_id)) points += 4;
-      if (assisters.includes(player_id)) points += 3;
-    } else if (playerPosition === "Forward") {
-      if (goal_scorers.includes(player_id)) points += 4;
-      if (assisters.includes(player_id)) points += 3;
-    } else if (playerPosition === "Goalkeeper") {
-      if (data.goals_against === 0) points += 6;
-      if (goal_scorers.includes(player_id)) points += 6;
-      if (assisters.includes(player_id)) points += 3;
-    }
+      if (playerPosition === "Defence") {
+        if (data.goals_against === 0) points += 4;
+        if (goal_scorers.includes(player_id)) points += 6;
+        if (assisters.includes(player_id)) points += 3;
+      } else if (playerPosition === "Midfield") {
+        if (data.goals_against === 0) points += 1;
+        if (goal_scorers.includes(player_id)) points += 4;
+        if (assisters.includes(player_id)) points += 3;
+      } else if (playerPosition === "Forward") {
+        if (goal_scorers.includes(player_id)) points += 4;
+        if (assisters.includes(player_id)) points += 3;
+      } else if (playerPosition === "GK") {
+        if (data.goals_against === 0) points += 6;
+        if (goal_scorers.includes(player_id)) points += 6;
+        if (assisters.includes(player_id)) points += 3;
+      }
 
-    resolve(points);
+      resolve(points);
     });
   });
 }
 
+// Asynchronously handles the insert of points data
+// Notes : I think I prefer this method of inserting, utilising Promises instead of cascading inserts as I have been doing before.
+//         Effectively acheives the same thing as cascading inserts, however is much more readable.#
+//         Moving forward - utilise Promises rather than cascading - might need to "npm install nedb-promises" to make it the most efficient
 async function handleMatchInsert({ data, squad, goalScorerIds, matchDoc, gameweek_id, res }) {
   try {
     const match_id = matchDoc._id;
@@ -372,7 +468,7 @@ async function handleMatchInsert({ data, squad, goalScorerIds, matchDoc, gamewee
     });
 
     console.log("worked");
-  
+
     return res.status(200).send({
       message: "Match, goal scorers, squad, and points saved successfully."
     });
