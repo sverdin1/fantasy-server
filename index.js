@@ -63,7 +63,9 @@ app.post('/add-player', (req, res) => {
   // Step 1: Insert the player with server_id as a foreign key
   players_db.insert({
     name: data.name,
-    server_id: data.server_id
+    server_id: data.server_id,
+    price: data.price,
+    position: data.position
   }, (playerErr, playerDoc) => {
     if (playerErr) {
       return res.status(500).json({ error: "Error inserting player" });
@@ -147,14 +149,15 @@ app.get('/user', (req, res) => {
 })
 
 // Called when a user creates a team
-app.post('/submitPlayers', (req, res) => {
+app.post('/submit-players', (req, res) => {
   const data = req.body;
   const selectedPlayers = data.selectedPlayers; // Array of player IDs
 
   // Step 1: Insert the new team (without players array)
   teams_db.insert({
     server_id: data.server_id,
-    user_id: data.user_uid
+    user_id: data.user_uid,
+    team_cost: data.team_cost
   }, (insertErr, newTeam) => {
     if (insertErr) {
       return res.status(500).json({ error: 'Error inserting new team' });
@@ -179,6 +182,83 @@ app.post('/submitPlayers', (req, res) => {
     });
   });
 });
+
+app.post('/submit-team-changes', (req, res) => {
+  const data = req.body;
+  const server_id = data.server_id;
+  const new_team = data.selectedPlayers; // array of objects with at least 'player_id'
+
+  teams_db.update(
+    { user_id: data.user_uid },                   // query
+    { $set: { team_cost: data.team_cost } },      // update
+    {},                                           // options
+    (err, numReplaced) => {
+      if (err) {
+        return res.status(500).json({ error: err });
+      }
+
+      // Now fetch the updated team document
+      teams_db.findOne({ user_id: data.user_uid }, (findErr, doc) => {
+        if (findErr || !doc) {
+          return res.status(500).json({ error: findErr || "Team not found" });
+        }
+
+        // Now proceed with team_players_db logic
+        team_players_db.find({ team_id: doc._id }, async (tp_err, old_team_docs) => {
+          if (tp_err) {
+            return res.status(500).json({ error: tp_err });
+          }
+
+          const old_player_ids = old_team_docs.map(p => p.player_id.toString());
+          const new_player_ids = data.selectedPlayers.map(p => p.player_id.toString());
+
+          const toDelete = old_team_docs.filter(p => !new_player_ids.includes(p.player_id.toString()));
+          const toAdd = data.selectedPlayers.filter(p => !old_player_ids.includes(p.player_id.toString()));
+
+          try {
+            // Delete players no longer in team
+            const deletePromises = toDelete.map(p =>
+              new Promise((resolve, reject) => {
+                team_players_db.remove({ _id: p._id }, {}, (err, numRemoved) => {
+                  if (err) reject(err);
+                  else resolve(p); // return deleted doc
+                });
+              })
+            );
+
+            const deletedDocs = await Promise.all(deletePromises);
+
+            // Add new players using deleted position_index if available
+            const addPromises = toAdd.map((p, index) => {
+              const position_index = deletedDocs[index] ? deletedDocs[index].position_index : null;
+              return new Promise((resolve, reject) => {
+                team_players_db.insert(
+                  {
+                    team_id: doc._id,
+                    player_id: p.player_id,
+                    position_index: position_index,
+                    // add other fields from p if needed
+                  },
+                  (err, newDoc) => {
+                    if (err) reject(err);
+                    else resolve(newDoc);
+                  }
+                );
+              });
+            });
+
+            await Promise.all(addPromises);
+
+            return res.status(200).json({ success: true });
+          } catch (dbErr) {
+            return res.status(500).json({ error: dbErr });
+          }
+        });
+      });
+    }
+  );
+});
+
 
 // Attaches a server_id to a user
 app.post('/join-league', (req, res) => {
@@ -322,12 +402,20 @@ app.get('/get-team', async (req, res) => {
       });
     });
 
-    const getPoints = (playerId) =>
-      points.find(p => p.player_id === playerId)?.points || 0;
+    // Adjusted such that if a player has multiple submissions on a gameweek, their points will be summed!
+    const getPoints = (playerId) => {
+      const objArray = points.filter(p => p.player_id === playerId);
+      const pointsArray = objArray.map(obj => obj.points || 0);
+      let totalPoints = 0;
+      for (let i = 0; i < pointsArray.length; i++) {
+        totalPoints += pointsArray[i];
+      }
+      return totalPoints;
+    }
 
     const idToName = players.map(item => item.name);
 
-    const player_data = sorted_team.map((obj,index) => ({
+    const player_data = sorted_team.map((obj, index) => ({
       player_id: obj.player_id,
       player_name: idToName[index],
       player_points: getPoints(obj.player_id),
@@ -340,6 +428,22 @@ app.get('/get-team', async (req, res) => {
   }
 });
 
+// Fetches data relating to the team (i.e team name, team cost) given the user_id
+app.get('/get-team-data', (req, res) => {
+  const user_id = req.query.userID;
+
+  teams_db.findOne({ user_id: user_id }, (err, doc) => {
+    if (err) {
+      return res.status(500).json({ error: err });
+    }
+    else if (!doc) {
+      return res.status(404);
+    }
+    else {
+      return res.status(200).json(doc);
+    }
+  })
+})
 
 // Returns the most recent gameweek, given the server_id
 function getRecentGameweek(given_server_id, callback) {
