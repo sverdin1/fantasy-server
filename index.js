@@ -135,7 +135,7 @@ app.get('/fetch-players', (req, res) => {
 app.get('/user', (req, res) => {
   const user_id = req.query.user_id;
 
-  teams_db.find({ "user_id": user_id }, (err, foundData) => {
+  teams_db.findOne({ "user_id": user_id }, (err, foundData) => {
     if (err) {
       res.status(500).json({ 'status': err });
     }
@@ -143,7 +143,10 @@ app.get('/user', (req, res) => {
       res.status(404).json({ "status": "not found" });
     }
     else {
-      res.status(200).json({ "status": "found!" })
+      res.status(200).json({
+         "status": "found!",
+         'admin' : foundData.admin
+      });
     }
   })
 })
