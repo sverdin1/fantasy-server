@@ -36,9 +36,13 @@ gameweeks_db.loadDatabase();
 const squads_db = new Datastore('squads.db');
 squads_db.loadDatabase();
 
-// Points database
+// Player Points database
 const points_db = new Datastore('points.db');
 points_db.loadDatabase();
+
+// Team Points database
+const team_points_db = new Datastore('team_points.db');
+team_points_db.loadDatabase();
 
 
 //  ------------------------------------
@@ -571,6 +575,56 @@ async function handleMatchInsert({ data, squad, goalScorerIds, matchDoc, gamewee
       points_db.insert(player_points, (err) => {
         if (err) return reject(err);
         resolve();
+      });
+    }); 
+
+    await new Promise((resolve, reject) => {
+      team_players_db.find({ player_id: { $in: squad } }, (err, playerMappings) => {
+        if (err) return reject(err);
+
+        // Map player_id -> team_id
+        const playerToTeam = {};
+        playerMappings.forEach(({ player_id, team_id }) => {
+          playerToTeam[player_id] = team_id;
+        });
+
+        // Aggregate total points per team
+        const teamPointsMap = {};
+        player_points.forEach(({ player_id, points }) => {
+          const team_id = playerToTeam[player_id];
+          if (!team_id) return;
+          teamPointsMap[team_id] = (teamPointsMap[team_id] || 0) + points;
+        });
+
+        // Process each team
+        let pending = Object.keys(teamPointsMap).length;
+        if (pending === 0) return resolve();
+
+        Object.entries(teamPointsMap).forEach(([team_id, pointsToAdd]) => {
+          team_points_db.find({ team_id, gameweek_id }, (findErr, existing) => {
+            if (findErr) return reject(findErr);
+
+            if (existing.length === 0) {
+              team_points_db.insert(
+                { gameweek_id, team_id, team_points: pointsToAdd },
+                (insertErr) => {
+                  if (insertErr) return reject(insertErr);
+                  if (--pending === 0) resolve();
+                }
+              );
+            } else {
+              team_points_db.update(
+                { team_id, gameweek_id },
+                { $inc: { team_points: pointsToAdd } },
+                {},
+                (updateErr) => {
+                  if (updateErr) return reject(updateErr);
+                  if (--pending === 0) resolve();
+                }
+              );
+            }
+          });
+        });
       });
     });
 
