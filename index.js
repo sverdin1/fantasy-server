@@ -155,6 +155,89 @@ app.get('/user', (req, res) => {
   })
 })
 
+// Gets all user data (currently just ID's) for a server
+app.get('/fetch-users', (req,res) =>{
+  const server_id = req.query.serverID;
+
+  teams_db.find({'server_id' : server_id}, (err, foundData) => {
+    if(err){
+      return res.status(500);
+    }
+    else if(foundData.length == 0){
+      return res.status(404);
+    }
+    else{
+      // Maybe we can send less data to make more efficient
+      return res.json({users : foundData}).status(200);
+    }
+  })
+})
+
+app.post('/update-admin', (req, res) => {
+  teams_db.find({ user_id : req.body.user_id}, (err, data) => {
+    if(data.length == 0){
+      return res.status(404).send("No player found with that ID")
+    }
+    else if(err){
+      return res.status(500).json({error : err});
+    }
+    else if(data[0].admin == 0){ // If user is not an admin, then update their status
+      teams_db.update(
+          { user_id: req.body.user_id },
+          { $set: { admin: 1 } },
+          {},
+          (err, _) => {
+            if (err) {
+              return res.status(500).send("Database update failed");
+            }
+            return res.status(200).send("Update successful");
+          }
+        );
+    }
+    return res.status(200).send("User is already an admin");
+  })    
+});
+
+app.get('/fetch-leaderboard', (req,res) => {
+  const server_id = req.query.serverID;
+
+  gameweeks_db.find({ server_id : server_id}, (gwErr, gwData) => {
+    if(gwErr){
+      return res.status(500).json({error : gwErr});
+    }
+    else{
+      team_points_db.find({gameweek_id : {$in : gwData.map(gw => gw._id)}}, (err, data) => {
+        if(err){
+      return res.status(500).json({error : err});
+        }
+        else{
+          let team_points_map = {};
+          data.forEach(({team_id, team_points}) => {
+            if(!team_points_map[team_id]){
+              team_points_map[team_id] = 0;
+            }
+            team_points_map[team_id] += team_points;
+          })
+          
+          let team_points_array = [];
+          Object.entries(team_points_map).forEach(([team_id, team_points]) => {
+            team_points_array.push({
+              team_id : team_id,
+              team_points : team_points
+            })
+          });
+
+          team_points_array = [...team_points_array].sort(
+            (a,b) => b.team_points - a.team_points
+          );
+
+          return res.status(200).json({team_data : team_points_array});
+        }
+      })
+    }
+  })
+})
+
 // Called when a user creates a team
 app.post('/submit-players', (req, res) => {
   const data = req.body;
@@ -283,53 +366,6 @@ app.post('/join-league', (req, res) => {
     }
   });
 });
-
-// Returns a user's team, given the user_id
-// app.get('/get-team', (req, res) => {
-//   const user_id = req.query.userID;
-
-//   teams_db.find({ "user_id": user_id }, (err, doc) => {
-//     if (err) {
-//       res.status(500).json({ error: err });
-//     }
-//     else if (!doc) {
-//       res.status(404).json({ message: "not found" })
-//     }
-//     else {
-//       team_id = doc[0]._id;
-//       team_players_db.find({ "team_id": team_id }, (teamErr, teamDoc) => {
-//         if (teamErr) {
-//           res.status(500).json({ error: teamErr })
-//         }
-//         else if (!teamDoc) {
-//           res.status(404).json({ message: "not found" });
-//         }
-//         else {
-//           const sorted_team = [...teamDoc].sort(
-//             (a, b) => a.position_index - b.position_index
-//           );
-
-//           const playerIds = sorted_team.map(player => player.player_id);
-
-//           players_db.find({ _id: { $in: playerIds } }, (playerErr, players) => {
-//             if (playerErr) {
-//               res.status(500).json({ error: playerErr });
-//             } else {
-//               const idToName = {};
-//               players.forEach(p => {
-//                 idToName[p._id] = p.name;
-//               });
-
-//               const playerNames = sorted_team.map(player => idToName[player.player_id]);
-
-//               res.json({ team: playerNames }).status(200);
-//             }
-//           });
-//         }
-//       })
-//     }
-//   })
-// })
 
 // Returns an array of sorted objects from team_players
 async function fetchTeam(userID) {
@@ -692,3 +728,4 @@ app.post('/submit-result', (req, res) => {
     }
   });
 });
+
